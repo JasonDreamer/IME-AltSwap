@@ -78,4 +78,32 @@ if(BUILD_TESTING)
     set_property(TARGET ImeRuntimeProbe PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_link_libraries(ImeRuntimeProbe PRIVATE Imm32 User32)
+
+    add_executable(ImePhysicalProbe WIN32 tests/ImePhysicalProbe.cpp)
+    target_compile_definitions(ImePhysicalProbe PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    target_compile_options(ImePhysicalProbe PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /utf-8>
+    )
+    set_property(TARGET ImePhysicalProbe PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_link_libraries(ImePhysicalProbe PRIVATE Imm32 User32)
+
+    add_executable(ImeForegroundProbe WIN32 tests/ImeForegroundProbe.cpp)
+    target_compile_definitions(ImeForegroundProbe PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    target_compile_options(ImeForegroundProbe PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /utf-8>
+    )
+    set_property(TARGET ImeForegroundProbe PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_link_libraries(ImeForegroundProbe PRIVATE Imm32 User32)
 endif()
