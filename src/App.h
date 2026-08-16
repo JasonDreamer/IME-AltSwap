@@ -24,6 +24,7 @@ private:
     void RemoveTrayIcon() noexcept;
     void ShowTrayMenu();
     void InjectMenuCancellationKey() const noexcept;
+    void DismissAltNavigation() const noexcept;
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;

@@ -9,6 +9,27 @@ namespace {
 constexpr UINT kImeGetOpenStatus = 0x0005;
 constexpr UINT kImeSetOpenStatus = 0x0006;
 constexpr ULONG_PTR kProbeInputMarker = static_cast<ULONG_PTR>(0x52554E50524F4245ULL);
+WNDPROC gOriginalWindowProcedure = nullptr;
+bool gEnterKeyDownDelivered = false;
+bool gEnterWasSystemKey = false;
+bool gAltChordDelivered = false;
+bool gChordKeyDownDelivered = false;
+
+LRESULT CALLBACK ProbeWindowProcedure(
+    const HWND window,
+    const UINT message,
+    const WPARAM wParam,
+    const LPARAM lParam) {
+    if ((message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wParam == VK_RETURN) {
+        gEnterKeyDownDelivered = true;
+        gEnterWasSystemKey = message == WM_SYSKEYDOWN;
+    }
+    if ((message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wParam == 'F') {
+        gChordKeyDownDelivered = true;
+        gAltChordDelivered = message == WM_SYSKEYDOWN;
+    }
+    return CallWindowProcW(gOriginalWindowProcedure, window, message, wParam, lParam);
+}
 
 bool IsImeStateVirtualKey(const int virtualKey) {
     if (virtualKey >= 0xF0 && virtualKey <= 0xFD) {
@@ -117,6 +138,8 @@ void ReleaseProbeModifiers() {
         KeyInput(VK_SHIFT, true),
         KeyInput(VK_LSHIFT, true),
         KeyInput(VK_RSHIFT, true),
+        KeyInput('F', true),
+        KeyInput(VK_RETURN, true),
     };
     SendInput(static_cast<UINT>(input.size()), input.data(), sizeof(INPUT));
 }
@@ -183,8 +206,12 @@ bool SendAltChord() {
     }
     PumpMessages(std::chrono::milliseconds(40));
 
+    INPUT key = KeyInput('F', false);
+    if (SendInput(1, &key, sizeof(INPUT)) != 1) {
+        return false;
+    }
+    PumpMessages(std::chrono::milliseconds(40));
     std::array input{
-        KeyInput('F', false),
         KeyInput('F', true),
         KeyInput(VK_LMENU, true),
     };
@@ -236,6 +263,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         ActivateKeyboardLayout(originalLayout, 0);
         return 11;
     }
+    gOriginalWindowProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+        window,
+        GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(ProbeWindowProcedure)));
+    if (gOriginalWindowProcedure == nullptr) {
+        DestroyWindow(window);
+        ActivateKeyboardLayout(originalLayout, 0);
+        return 11;
+    }
 
     int result = 0;
     bool originalOpen = false;
@@ -260,12 +296,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         result = 31;
     }
 
+    gAltChordDelivered = false;
+    gChordKeyDownDelivered = false;
     if (result == 0 && (!SetImeOpenStatus(window, true) || !SendAltChord())) {
         result = 40;
     }
     PumpMessages(std::chrono::milliseconds(300));
     if (result == 0 && (!ImeOpenStatus(window, open) || !open)) {
         result = 41;
+    }
+    if (result == 0 && !gChordKeyDownDelivered) {
+        result = 42;
+    } else if (result == 0 && !gAltChordDelivered) {
+        result = 43;
     }
 
     if (result == 0 &&
@@ -350,9 +393,41 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         result = 111;
     }
 
+    if (result == 0 && !FocusProbeWindow(window)) {
+        result = 120;
+    }
+    gEnterKeyDownDelivered = false;
+    gEnterWasSystemKey = false;
+    if (result == 0 &&
+        (!SetImeOpenStatus(window, true) ||
+         !SendAltTap(VK_LMENU, std::chrono::milliseconds(40)))) {
+        result = 120;
+    }
+    std::array enterInput{
+        KeyInput(VK_RETURN, false),
+        KeyInput(VK_RETURN, true),
+    };
+    if (result == 0 &&
+        SendInput(static_cast<UINT>(enterInput.size()), enterInput.data(), sizeof(INPUT)) != enterInput.size()) {
+        result = 120;
+    }
+    PumpMessages(std::chrono::milliseconds(100));
+    if (result == 0 && (!ImeOpenStatus(window, open) || open)) {
+        result = 124;
+    }
+    if (result == 0 && (GetForegroundWindow() != window || GetFocus() != window)) {
+        result = 126;
+    }
+    if (result == 0 && !gEnterKeyDownDelivered) {
+        result = 122;
+    } else if (result == 0 && gEnterWasSystemKey) {
+        result = 123;
+    }
+
     ReleaseProbeModifiers();
     PumpMessages(std::chrono::milliseconds(100));
     SetImeOpenStatus(window, originalOpen);
+    SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(gOriginalWindowProcedure));
     DestroyWindow(window);
     ActivateKeyboardLayout(originalLayout, 0);
     SetCursorPos(originalCursor.x, originalCursor.y);

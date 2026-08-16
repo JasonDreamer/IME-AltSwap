@@ -432,6 +432,9 @@ void InputHookHost::ProcessKeyboardEvent(
     if (isInitialAltDown) {
         PostMessageW(notificationWindow_, kCancelAltMenuMessage, 0, 0);
     }
+    if (action != AltTapAction::None) {
+        PostMessageW(notificationWindow_, kDismissAltNavigationMessage, 0, 0);
+    }
     if (action == AltTapAction::ImeOff) {
         RequestImeChange(leftAltTarget_, false);
     } else if (action == AltTapAction::ImeOn) {
