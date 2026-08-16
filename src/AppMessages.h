@@ -4,4 +4,3 @@
 
 inline constexpr UINT kImeSwitchRequestMessage = WM_APP + 2;
 inline constexpr UINT kCancelAltMenuMessage = WM_APP + 3;
-inline constexpr UINT kDismissAltNavigationMessage = WM_APP + 4;

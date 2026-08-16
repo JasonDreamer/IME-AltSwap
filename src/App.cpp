@@ -117,10 +117,6 @@ LRESULT App::HandleWindowMessage(
         InjectMenuCancellationKey();
         return 0;
 
-    case kDismissAltNavigationMessage:
-        DismissAltNavigation();
-        return 0;
-
     case kImeSwitchRequestMessage: {
         const HWND target = reinterpret_cast<HWND>(lParam);
         imeSwitchCoordinator_.Request({target, target}, wParam != 0);
@@ -211,16 +207,6 @@ void App::InjectMenuCancellationKey() const noexcept {
     std::array<INPUT, 2> input{};
     input[0].type = INPUT_KEYBOARD;
     input[0].ki.wVk = 0x07;
-    input[0].ki.dwExtraInfo = kInjectedInputMarker;
-    input[1] = input[0];
-    input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(static_cast<UINT>(input.size()), input.data(), sizeof(INPUT));
-}
-
-void App::DismissAltNavigation() const noexcept {
-    std::array<INPUT, 2> input{};
-    input[0].type = INPUT_KEYBOARD;
-    input[0].ki.wVk = VK_ESCAPE;
     input[0].ki.dwExtraInfo = kInjectedInputMarker;
     input[1] = input[0];
     input[1].ki.dwFlags = KEYEVENTF_KEYUP;
