@@ -32,5 +32,7 @@ private:
     NOTIFYICONDATAW trayIcon_{};
     InputHookHost inputHookHost_;
     ImeSwitchCoordinator imeSwitchCoordinator_;
+    ImeTarget leftAltTarget_{};
+    ImeTarget rightAltTarget_{};
     bool enabled_ = true;
 };

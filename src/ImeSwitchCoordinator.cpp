@@ -72,7 +72,7 @@ void ImeSwitchCoordinator::WorkerLoop() noexcept {
 
         while (!stopping_) {
             lock.unlock();
-            if (ImeController::IsTargetCurrent(active.target)) {
+            if (ImeController::IsTargetValid(active.target)) {
                 ImeController::SetOpenStatus(active.target, active.open);
             }
             lock.lock();

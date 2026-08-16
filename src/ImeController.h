@@ -10,6 +10,6 @@ struct ImeTarget final {
 class ImeController final {
 public:
     static ImeTarget CaptureTarget() noexcept;
-    static bool IsTargetCurrent(const ImeTarget& target) noexcept;
+    static bool IsTargetValid(const ImeTarget& target) noexcept;
     static bool SetOpenStatus(const ImeTarget& target, bool open) noexcept;
 };

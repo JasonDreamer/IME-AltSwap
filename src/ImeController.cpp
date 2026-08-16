@@ -83,25 +83,21 @@ ImeTarget ImeController::CaptureTarget() noexcept {
     return CaptureCurrentTarget();
 }
 
-bool ImeController::IsTargetCurrent(const ImeTarget& target) noexcept {
+bool ImeController::IsTargetValid(const ImeTarget& target) noexcept {
     return target.foreground != nullptr &&
         IsWindow(target.foreground) != FALSE &&
-        GetForegroundWindow() == target.foreground;
+        target.focused != nullptr &&
+        IsWindow(target.focused) != FALSE;
 }
 
 bool ImeController::SetOpenStatus(const ImeTarget& target, const bool open) noexcept {
-    if (!IsTargetCurrent(target)) {
+    if (!IsTargetValid(target)) {
         return false;
     }
-
-    const ImeTarget current = CaptureCurrentTarget();
-    if (current.foreground != target.foreground || current.focused == nullptr) {
-        return false;
-    }
-    if (SetWithImm32(current.focused, open)) {
+    if (SetWithImm32(target.focused, open)) {
         return true;
     }
-    if (!IsTargetCurrent(target)) {
+    if (GetForegroundWindow() != target.foreground) {
         return false;
     }
     return SetWithExplicitImeKey(open);

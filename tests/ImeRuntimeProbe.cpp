@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cwchar>
 
 namespace {
 constexpr UINT kImeGetOpenStatus = 0x0005;
@@ -235,6 +236,8 @@ bool FocusProbeWindow(const HWND window) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    const bool switchOnly = std::wcsstr(GetCommandLineW(), L"--switch-only") != nullptr;
+    const bool rapidOnly = std::wcsstr(GetCommandLineW(), L"--rapid-only") != nullptr;
     ReleaseProbeModifiers();
     PumpMessages(std::chrono::milliseconds(100));
 
@@ -291,11 +294,79 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (result == 0 && (!SetImeOpenStatus(window, false) || !SendAltTap(VK_RMENU))) {
         result = 30;
     }
-    PumpMessages(std::chrono::milliseconds(300));
+    bool rightAltBecameOpen = false;
+    for (int sample = 0; result == 0 && sample < 30; ++sample) {
+        PumpMessages(std::chrono::milliseconds(10));
+        bool sampledOpen = false;
+        if (ImeOpenStatus(window, sampledOpen) && sampledOpen) {
+            rightAltBecameOpen = true;
+        }
+    }
     if (result == 0 && (!ImeOpenStatus(window, open) || !open)) {
-        result = 31;
+        result = rightAltBecameOpen ? 32 : 31;
+    }
+    if (switchOnly || rapidOnly) {
+        if (result == 0 && rapidOnly &&
+            (!SetImeOpenStatus(window, false) ||
+             !SendAltTap(VK_LMENU, std::chrono::milliseconds(25)))) {
+            result = 90;
+        }
+        const int rapidSequenceHeldKey = rapidOnly ? FindAnotherKeyDown() : 0;
+        if (result == 0 && rapidSequenceHeldKey != 0) {
+            result = 1000 + rapidSequenceHeldKey;
+        }
+        if (result == 0 && rapidOnly && !SendAltTap(VK_RMENU, std::chrono::milliseconds(25))) {
+            result = 90;
+        }
+        if (rapidOnly) {
+            PumpMessages(std::chrono::milliseconds(350));
+        }
+        if (result == 0 && rapidOnly && (!ImeOpenStatus(window, open) || !open)) {
+            result = 91;
+        }
+
+        if (result == 0 && rapidOnly &&
+            (!SetImeOpenStatus(window, true) ||
+             !SendAltTap(VK_RMENU, std::chrono::milliseconds(25)) ||
+             !SendAltTap(VK_LMENU, std::chrono::milliseconds(25)))) {
+            result = 100;
+        }
+        if (rapidOnly) {
+            PumpMessages(std::chrono::milliseconds(350));
+        }
+        if (result == 0 && rapidOnly && (!ImeOpenStatus(window, open) || open)) {
+            result = 101;
+        }
+
+        if (result == 0 && rapidOnly && !SetImeOpenStatus(window, false)) {
+            result = 110;
+        }
+        for (int repetition = 0; result == 0 && rapidOnly && repetition < 6; ++repetition) {
+            if (!SendAltTap(VK_LMENU, std::chrono::milliseconds(20)) ||
+                !SendAltTap(VK_RMENU, std::chrono::milliseconds(20))) {
+                result = 110;
+            }
+        }
+        if (rapidOnly) {
+            PumpMessages(std::chrono::milliseconds(350));
+        }
+        if (result == 0 && rapidOnly && (!ImeOpenStatus(window, open) || !open)) {
+            result = 111;
+        }
+
+        ReleaseProbeModifiers();
+        PumpMessages(std::chrono::milliseconds(100));
+        SetImeOpenStatus(window, originalOpen);
+        SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(gOriginalWindowProcedure));
+        DestroyWindow(window);
+        ActivateKeyboardLayout(originalLayout, 0);
+        SetCursorPos(originalCursor.x, originalCursor.y);
+        return result;
     }
 
+    if (result == 0 && !FocusProbeWindow(window)) {
+        result = 39;
+    }
     gAltChordDelivered = false;
     gChordKeyDownDelivered = false;
     if (result == 0 && (!SetImeOpenStatus(window, true) || !SendAltChord())) {

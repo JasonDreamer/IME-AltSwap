@@ -64,8 +64,11 @@ bool HookCoveredRawInput(const std::uint32_t hookTimestamp, const std::uint32_t 
     if (hookTimestamp == 0) {
         return false;
     }
-    return static_cast<LONG>(hookTimestamp - rawTimestamp) >= -kRawInputTimestampToleranceMilliseconds;
+    const LONG difference = static_cast<LONG>(hookTimestamp - rawTimestamp);
+    return difference >= -kRawInputTimestampToleranceMilliseconds &&
+        difference <= kRawInputTimestampToleranceMilliseconds;
 }
+
 }  // namespace
 
 InputHookHost* InputHookHost::current_ = nullptr;
@@ -221,8 +224,11 @@ bool InputHookHost::InitializeThread() noexcept {
         return false;
     }
 
+    if (!InstallInitialHooks()) {
+        return false;
+    }
     InitializeKeyState();
-    return InstallInitialHooks();
+    return true;
 }
 
 void InputHookHost::UninitializeThread() noexcept {
@@ -299,11 +305,14 @@ LRESULT InputHookHost::HandleKeyboardMessage(
     }
 
     const auto& key = *reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
-    lastKeyboardHookTimestamp_ = key.time;
+    const std::uint32_t virtualKey = NormalizeAltKey(key);
+    const bool isDown = IsKeyDownMessage(wParam);
+    recentKeyboardHookEvents_[nextKeyboardHookEvent_] = {key.time, virtualKey, isDown};
+    nextKeyboardHookEvent_ = (nextKeyboardHookEvent_ + 1) % recentKeyboardHookEvents_.size();
     if (key.dwExtraInfo != kInjectedInputMarker) {
         ProcessKeyboardEvent(
-            NormalizeAltKey(key),
-            IsKeyDownMessage(wParam),
+            virtualKey,
+            isDown,
             key.time);
     }
     return CallNextHookEx(keyboardHook_, code, wParam, lParam);
@@ -362,16 +371,21 @@ void InputHookHost::HandleRawInput(const HRAWINPUT rawInputHandle) noexcept {
 
     const std::uint32_t timestamp = static_cast<std::uint32_t>(GetMessageTime());
     if (input.header.dwType == RIM_TYPEKEYBOARD) {
-        if (HookCoveredRawInput(lastKeyboardHookTimestamp_, timestamp)) {
-            return;
-        }
-        RefreshHooks();
-        lastKeyboardHookTimestamp_ = timestamp;
         const RAWKEYBOARD& keyboard = input.data.keyboard;
         if (keyboard.VKey != 0xFF) {
+            const std::uint32_t virtualKey = NormalizeRawAltKey(keyboard);
+            const bool isDown = (keyboard.Flags & RI_KEY_BREAK) == 0;
+            for (const RecentKeyboardHookEvent& hookEvent : recentKeyboardHookEvents_) {
+                if (hookEvent.virtualKey == virtualKey &&
+                    hookEvent.isDown == isDown &&
+                    HookCoveredRawInput(hookEvent.timestamp, timestamp)) {
+                    return;
+                }
+            }
+            RefreshHooks();
             ProcessKeyboardEvent(
-                NormalizeRawAltKey(keyboard),
-                (keyboard.Flags & RI_KEY_BREAK) == 0,
+                virtualKey,
+                isDown,
                 timestamp);
         }
         return;
@@ -400,7 +414,7 @@ void InputHookHost::ProcessKeyboardEvent(
     const std::uint32_t virtualKey,
     const bool isDown,
     const std::uint32_t timestampMilliseconds) noexcept {
-    if (virtualKey >= keyDown_.size()) {
+    if (virtualKey == 0x07 || virtualKey >= keyDown_.size()) {
         return;
     }
 
@@ -412,16 +426,6 @@ void InputHookHost::ProcessKeyboardEvent(
 
     const bool isInitialAltDown = isDown && !wasDown &&
         (virtualKey == kLeftAlt || virtualKey == kRightAlt);
-    if (virtualKey == kLeftAlt) {
-        if (isInitialAltDown) {
-            leftAltTarget_ = GetForegroundWindow();
-        }
-    } else if (virtualKey == kRightAlt) {
-        if (isInitialAltDown) {
-            rightAltTarget_ = GetForegroundWindow();
-        }
-    }
-
     const bool anotherKeyIsAlreadyDown = isInitialAltDown && IsAnotherKeyDown();
     const AltTapAction action = detector_.OnKey(
         virtualKey,
@@ -430,24 +434,20 @@ void InputHookHost::ProcessKeyboardEvent(
         anotherKeyIsAlreadyDown);
 
     if (isInitialAltDown) {
-        PostMessageW(notificationWindow_, kCancelAltMenuMessage, 0, 0);
-    }
-    if (action != AltTapAction::None) {
-        PostMessageW(notificationWindow_, kCancelAltMenuMessage, 0, 0);
+        PostMessageW(
+            notificationWindow_,
+            kCancelAltMenuMessage,
+            virtualKey == kRightAlt ? 1 : 0,
+            0);
+        Sleep(5);
     }
     if (action == AltTapAction::ImeOff) {
-        RequestImeChange(leftAltTarget_, false);
+        RequestImeChange(false);
     } else if (action == AltTapAction::ImeOn) {
         keyDown_[VK_CONTROL] = false;
         keyDown_[VK_LCONTROL] = false;
         keyDown_[VK_RCONTROL] = false;
-        RequestImeChange(rightAltTarget_, true);
-    }
-
-    if (!isDown && virtualKey == kLeftAlt) {
-        leftAltTarget_ = nullptr;
-    } else if (!isDown && virtualKey == kRightAlt) {
-        rightAltTarget_ = nullptr;
+        RequestImeChange(true);
     }
 }
 
@@ -459,19 +459,10 @@ void InputHookHost::ProcessMouseActivity() noexcept {
 
 void InputHookHost::InitializeKeyState() noexcept {
     keyDown_.fill(false);
-    for (int virtualKey = VK_BACK; virtualKey <= 0xFE; ++virtualKey) {
-        if (virtualKey == VK_SHIFT || virtualKey == VK_CONTROL || virtualKey == VK_MENU ||
-            IsImeStateVirtualKey(virtualKey)) {
-            continue;
-        }
-        keyDown_[virtualKey] = (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
-    }
 }
 
 void InputHookHost::ResetInputState() noexcept {
     detector_.Reset();
-    leftAltTarget_ = nullptr;
-    rightAltTarget_ = nullptr;
     InitializeKeyState();
 }
 
@@ -490,12 +481,10 @@ bool InputHookHost::IsAnotherKeyDown() const noexcept {
     return false;
 }
 
-void InputHookHost::RequestImeChange(const HWND targetWindow, const bool open) const noexcept {
-    if (targetWindow != nullptr) {
-        PostMessageW(
-            notificationWindow_,
-            kImeSwitchRequestMessage,
-            static_cast<WPARAM>(open),
-            reinterpret_cast<LPARAM>(targetWindow));
-    }
+void InputHookHost::RequestImeChange(const bool open) const noexcept {
+    PostMessageW(
+        notificationWindow_,
+        kImeSwitchRequestMessage,
+        static_cast<WPARAM>(open),
+        0);
 }

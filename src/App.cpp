@@ -17,6 +17,18 @@ constexpr UINT kMenuEnabled = 1001;
 constexpr UINT kMenuStartup = 1002;
 constexpr UINT kMenuExit = 1003;
 constexpr ULONG_PTR kInjectedInputMarker = static_cast<ULONG_PTR>(0x494D45414C545357ULL);
+
+void ReleaseLegacyEscapeState() noexcept {
+    if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) == 0) {
+        return;
+    }
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = VK_ESCAPE;
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    input.ki.dwExtraInfo = kInjectedInputMarker;
+    SendInput(1, &input, sizeof(INPUT));
+}
 }  // namespace
 
 App::App(const HINSTANCE instance) noexcept : instance_(instance) {}
@@ -38,6 +50,7 @@ bool App::Initialize() {
     if (mutex_ == nullptr || GetLastError() == ERROR_ALREADY_EXISTS) {
         return false;
     }
+    ReleaseLegacyEscapeState();
 
     StartupManager::EnableOnFirstRun();
 
@@ -114,12 +127,17 @@ LRESULT App::HandleWindowMessage(
 
     switch (message) {
     case kCancelAltMenuMessage:
+        if (wParam != 0) {
+            rightAltTarget_ = ImeController::CaptureTarget();
+        } else {
+            leftAltTarget_ = ImeController::CaptureTarget();
+        }
         InjectMenuCancellationKey();
         return 0;
 
     case kImeSwitchRequestMessage: {
-        const HWND target = reinterpret_cast<HWND>(lParam);
-        imeSwitchCoordinator_.Request({target, target}, wParam != 0);
+        const bool open = wParam != 0;
+        imeSwitchCoordinator_.Request(open ? rightAltTarget_ : leftAltTarget_, open);
         return 0;
     }
 

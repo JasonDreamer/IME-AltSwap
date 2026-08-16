@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <thread>
@@ -24,6 +25,12 @@ public:
     void SetEnabled(bool enabled) noexcept;
 
 private:
+    struct RecentKeyboardHookEvent final {
+        std::uint32_t timestamp = 0;
+        std::uint32_t virtualKey = 0;
+        bool isDown = false;
+    };
+
     static LRESULT CALLBACK KeyboardProcedure(int code, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK MouseProcedure(int code, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK RawInputWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -46,7 +53,7 @@ private:
     void InitializeKeyState() noexcept;
     void ResetInputState() noexcept;
     bool IsAnotherKeyDown() const noexcept;
-    void RequestImeChange(HWND targetWindow, bool open) const noexcept;
+    void RequestImeChange(bool open) const noexcept;
 
     HWND notificationWindow_ = nullptr;
     HWND rawInputWindow_ = nullptr;
@@ -62,9 +69,8 @@ private:
     std::atomic_bool enabled_{true};
     AltTapDetector detector_;
     std::array<bool, 256> keyDown_{};
-    HWND leftAltTarget_ = nullptr;
-    HWND rightAltTarget_ = nullptr;
-    std::uint32_t lastKeyboardHookTimestamp_ = 0;
+    std::array<RecentKeyboardHookEvent, 16> recentKeyboardHookEvents_{};
+    std::size_t nextKeyboardHookEvent_ = 0;
     std::uint32_t lastMouseHookTimestamp_ = 0;
 
     static InputHookHost* current_;
